@@ -1,6 +1,6 @@
 # 🌀 Fractal Explorer
 
-A fast, modern, and GPU-accelerated fractal viewer written in Rust, powered by [`egui`](https://github.com/emilk/egui), [`eframe`](https://github.com/emilk/egui/tree/master/crates/eframe), and [`wgpu`](https://github.com/gfx-rs/wgpu). Zoom into the infinite, drag around the Mandelbrot set, toggle different fractal types, and enjoy real-time rendering — even on touch screens.
+A fast, modern, and GPU-accelerated fractal viewer written in Rust, powered by [`egui`](https://github.com/emilk/egui), [`eframe`](https://github.com/emilk/egui/tree/master/crates/eframe), and [`wgpu`](https://github.com/gfx-rs/wgpu) is coming. Zoom into the infinite, drag around the Mandelbrot set, toggle different fractal types, and enjoy real-time rendering — even on touch screens.
 
 ![Fractal Preview](preview.png)
 
@@ -26,7 +26,6 @@ A fast, modern, and GPU-accelerated fractal viewer written in Rust, powered by [
 ## 🖥️ Requirements
 
 - Rust (latest stable)
-- A GPU that supports WGPU (most modern hardware)
 
 ---
 
