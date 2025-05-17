@@ -181,7 +181,7 @@ impl App for FractalApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             
-// Use the same CPU rendering path for all fractal types for now
+// Use the same CPU rendering path for all fractal types
             let available = ui.available_size();
             self.width = available.x.max(1.0) as usize;
             self.height = available.y.max(1.0) as usize;
