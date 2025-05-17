@@ -1,1 +1,62 @@
-/target
+# Rust/Cargo
+/target/
+**/*.rs.bk
+Cargo.lock.bk
+
+# Rust Analyzer
+rust-project.json
+
+# IDE/editor files
+*.swp
+*.swo
+*~
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Images and other media
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.gif
+*.tiff
+*.webp
+*.ico
+
+# CLion/JetBrains IDEs
+.idea/
+cmake-build-*/
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Windows
+$RECYCLE.BIN/
+ehthumbs.db
+desktop.ini
+
+# Linux
+*~
+.cache/
+*.log
+
+# VSCode settings (optional, if you don't want to share them)
+.vscode/
+.vs/
+
+# Test output
+*.profraw
+
+# Misc
+*.log
+*.out
+*.exe
+*.dll
+*.dylib
+*.so
+
+# By default, keep Cargo.lock for binaries (do NOT ignore it)
+!prieview.png
