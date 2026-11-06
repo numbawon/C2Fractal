@@ -83,7 +83,12 @@ impl App for FractalApp {
         match input.pointer.interact_pos() {
             Some(pos) => {
                 let panel_top = ctx.screen_rect().top() + 32.0;
-                if pos.y > panel_top && input.pointer.any_click() && input.pointer.button_double_clicked(egui::PointerButton::Primary) {
+                if pos.y > panel_top
+                    && input.pointer.any_click()
+                    && input
+                        .pointer
+                        .button_double_clicked(egui::PointerButton::Primary)
+                {
                     let norm_x = (pos.x / self.width as f32 - 0.5) * 2.0;
                     let norm_y = (pos.y / self.height as f32 - 0.5) * 2.0;
                     let dx = norm_x as f64 / self.zoom;
@@ -114,7 +119,8 @@ impl App for FractalApp {
                         Some(last_pos) => {
                             let delta = pos - last_pos;
                             self.center_x -= delta.x as f64 / (self.zoom * self.width as f64 / 2.0);
-                            self.center_y -= delta.y as f64 / (self.zoom * self.height as f64 / 2.0);
+                            self.center_y -=
+                                delta.y as f64 / (self.zoom * self.height as f64 / 2.0);
                             interaction_happened = true;
                         }
                         None => {}
@@ -133,7 +139,8 @@ impl App for FractalApp {
             self.is_interacting = true;
             self.render_low_res = true;
             self.texture_handle = None;
-        } else if self.is_interacting && self.last_interaction.elapsed() > Duration::from_millis(25) {
+        } else if self.is_interacting && self.last_interaction.elapsed() > Duration::from_millis(25)
+        {
             self.is_interacting = false;
             self.render_low_res = false;
             self.texture_handle = None;
@@ -165,13 +172,19 @@ impl App for FractalApp {
 
                 ui.separator();
                 ui.label("🎨 Color:");
-                if ui.add(egui::Slider::new(&mut self.color_offset, 0..=255)).changed() {
+                if ui
+                    .add(egui::Slider::new(&mut self.color_offset, 0..=255))
+                    .changed()
+                {
                     self.texture_handle = None;
                 }
 
                 ui.separator();
                 ui.label("Iterations:");
-                if ui.add(egui::Slider::new(&mut self.max_iterations, 10..=1000)).changed() {
+                if ui
+                    .add(egui::Slider::new(&mut self.max_iterations, 10..=1000))
+                    .changed()
+                {
                     self.texture_handle = None;
                 }
 
@@ -184,15 +197,33 @@ impl App for FractalApp {
                         FractalType::BurningShip => "Burning Ship",
                     })
                     .show_ui(ui, |ui| {
-                        if ui.selectable_label(matches!(self.fractal_type, FractalType::Mandelbrot), "Mandelbrot").clicked() {
+                        if ui
+                            .selectable_label(
+                                matches!(self.fractal_type, FractalType::Mandelbrot),
+                                "Mandelbrot",
+                            )
+                            .clicked()
+                        {
                             self.fractal_type = FractalType::Mandelbrot;
                             self.texture_handle = None;
                         }
-                        if ui.selectable_label(matches!(self.fractal_type, FractalType::Julia), "Julia").clicked() {
+                        if ui
+                            .selectable_label(
+                                matches!(self.fractal_type, FractalType::Julia),
+                                "Julia",
+                            )
+                            .clicked()
+                        {
                             self.fractal_type = FractalType::Julia;
                             self.texture_handle = None;
                         }
-                        if ui.selectable_label(matches!(self.fractal_type, FractalType::BurningShip), "Burning Ship").clicked() {
+                        if ui
+                            .selectable_label(
+                                matches!(self.fractal_type, FractalType::BurningShip),
+                                "Burning Ship",
+                            )
+                            .clicked()
+                        {
                             self.fractal_type = FractalType::BurningShip;
                             self.texture_handle = None;
                         }
@@ -202,10 +233,24 @@ impl App for FractalApp {
                 if matches!(self.fractal_type, FractalType::Julia) {
                     ui.separator();
                     ui.label("c =");
-                    if ui.add(egui::Slider::new(&mut self.julia_re, -2.0..=2.0).text("re").step_by(0.001)).changed() {
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut self.julia_re, -2.0..=2.0)
+                                .text("re")
+                                .step_by(0.001),
+                        )
+                        .changed()
+                    {
                         self.texture_handle = None;
                     }
-                    if ui.add(egui::Slider::new(&mut self.julia_im, -2.0..=2.0).text("im").step_by(0.001)).changed() {
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut self.julia_im, -2.0..=2.0)
+                                .text("im")
+                                .step_by(0.001),
+                        )
+                        .changed()
+                    {
                         self.texture_handle = None;
                     }
                 }
@@ -217,8 +262,16 @@ impl App for FractalApp {
             self.width = available.x.max(1.0) as usize;
             self.height = available.y.max(1.0) as usize;
 
-            let render_width = if self.render_low_res { self.width / 2 } else { self.width };
-            let render_height = if self.render_low_res { self.height / 2 } else { self.height };
+            let render_width = if self.render_low_res {
+                self.width / 2
+            } else {
+                self.width
+            };
+            let render_height = if self.render_low_res {
+                self.height / 2
+            } else {
+                self.height
+            };
 
             if self.texture_handle.is_none() {
                 self.texture_handle = Some(render_fractal_to_texture(
@@ -246,7 +299,14 @@ impl App for FractalApp {
     }
 }
 
-fn iterate_fractal(fractal_type: FractalType, cx: f64, cy: f64, max_iterations: u32, julia_re: f64, julia_im: f64) -> u32 {
+fn iterate_fractal(
+    fractal_type: FractalType,
+    cx: f64,
+    cy: f64,
+    max_iterations: u32,
+    julia_re: f64,
+    julia_im: f64,
+) -> u32 {
     let (c, mut z) = match fractal_type {
         FractalType::Mandelbrot => (Complex::new(cx, cy), Complex::new(0.0, 0.0)),
         FractalType::Julia => (Complex::new(julia_re, julia_im), Complex::new(cx, cy)),
@@ -295,15 +355,21 @@ fn render_fractal_to_texture(
 ) -> egui::TextureHandle {
     let mut imgbuf = ImageBuffer::new(width as u32, height as u32);
 
-    imgbuf.enumerate_pixels_mut().par_bridge().for_each(|(x, y, pixel)| {
-        let cx = (x as f64 - width as f64 / 2.0) / (0.5 * zoom * width as f64) + center_x;
-        let cy = (y as f64 - height as f64 / 2.0) / (0.5 * zoom * height as f64) + center_y;
-        let i = iterate_fractal(fractal_type, cx, cy, max_iterations, julia_re, julia_im);
-        *pixel = color_from_iterations(i, max_iterations, color_offset);
-    });
+    imgbuf
+        .enumerate_pixels_mut()
+        .par_bridge()
+        .for_each(|(x, y, pixel)| {
+            let cx = (x as f64 - width as f64 / 2.0) / (0.5 * zoom * width as f64) + center_x;
+            let cy = (y as f64 - height as f64 / 2.0) / (0.5 * zoom * height as f64) + center_y;
+            let i = iterate_fractal(fractal_type, cx, cy, max_iterations, julia_re, julia_im);
+            *pixel = color_from_iterations(i, max_iterations, color_offset);
+        });
 
     let size = [width, height];
-    let pixels: Vec<_> = imgbuf.pixels().flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+    let pixels: Vec<_> = imgbuf
+        .pixels()
+        .flat_map(|p| [p[0], p[1], p[2], 255])
+        .collect();
     let image = ColorImage::from_rgba_unmultiplied(size, &pixels);
     ctx.load_texture("fractal", image, TextureOptions::NEAREST)
 }
@@ -322,12 +388,15 @@ fn save_fractal(
 ) {
     let mut imgbuf = ImageBuffer::new(width as u32, height as u32);
 
-    imgbuf.enumerate_pixels_mut().par_bridge().for_each(|(x, y, pixel)| {
-        let cx = (x as f64 - width as f64 / 2.0) / (0.5 * zoom * width as f64) + center_x;
-        let cy = (y as f64 - height as f64 / 2.0) / (0.5 * zoom * height as f64) + center_y;
-        let i = iterate_fractal(fractal_type, cx, cy, max_iterations, julia_re, julia_im);
-        *pixel = color_from_iterations(i, max_iterations, color_offset);
-    });
+    imgbuf
+        .enumerate_pixels_mut()
+        .par_bridge()
+        .for_each(|(x, y, pixel)| {
+            let cx = (x as f64 - width as f64 / 2.0) / (0.5 * zoom * width as f64) + center_x;
+            let cy = (y as f64 - height as f64 / 2.0) / (0.5 * zoom * height as f64) + center_y;
+            let i = iterate_fractal(fractal_type, cx, cy, max_iterations, julia_re, julia_im);
+            *pixel = color_from_iterations(i, max_iterations, color_offset);
+        });
 
     let type_name = match fractal_type {
         FractalType::Mandelbrot => "mandelbrot",
@@ -344,8 +413,7 @@ fn save_fractal(
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size(egui::vec2(800.0, 600.0)),
+        viewport: egui::ViewportBuilder::default().with_inner_size(egui::vec2(800.0, 600.0)),
         ..Default::default()
     };
 
