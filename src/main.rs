@@ -403,8 +403,10 @@ fn save_fractal(
         "{}_{:.2}_{:.2}_z{:.2}_c{}.png",
         name, center_x, center_y, zoom, params.color_offset
     );
-    imgbuf.save(&filename).expect("Failed to save image");
-    println!("Saved image to: {}", filename);
+    match imgbuf.save(&filename) {
+        Ok(()) => println!("Saved image to: {}", filename),
+        Err(e) => println!("Failed to save image to {}: {}", filename, e),
+    }
 }
 
 fn main() -> eframe::Result<()> {
