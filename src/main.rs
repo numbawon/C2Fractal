@@ -14,17 +14,39 @@ pub enum FractalType {
     BurningShip,
 }
 
-const MAX_ITERATIONS: u32 = 100;
+#[derive(Copy, Clone)]
+struct FractalParams {
+    fractal_type: FractalType,
+    max_iterations: u32,
+    color_offset: u8,
+    julia_re: f64,
+    julia_im: f64,
+}
 
-fn iterate_fractal(fractal_type: FractalType, cx: f64, cy: f64, max_iterations: u32) -> u32 {
-    let (c, mut z) = match fractal_type {
+impl Default for FractalParams {
+    fn default() -> Self {
+        Self {
+            fractal_type: FractalType::Mandelbrot,
+            max_iterations: 100,
+            color_offset: 0,
+            julia_re: -0.8,
+            julia_im: 0.156,
+        }
+    }
+}
+
+fn iterate_fractal(cx: f64, cy: f64, params: &FractalParams) -> u32 {
+    let (c, mut z) = match params.fractal_type {
         FractalType::Mandelbrot => (Complex::new(cx, cy), Complex::new(0.0, 0.0)),
-        FractalType::Julia => (Complex::new(-0.8, 0.156), Complex::new(cx, cy)),
+        FractalType::Julia => (
+            Complex::new(params.julia_re, params.julia_im),
+            Complex::new(cx, cy),
+        ),
         FractalType::BurningShip => (Complex::new(cx, cy), Complex::new(0.0, 0.0)),
     };
     let mut i = 0u32;
-    while i < max_iterations && z.norm_sqr() <= 4.0 {
-        match fractal_type {
+    while i < params.max_iterations && z.norm_sqr() <= 4.0 {
+        match params.fractal_type {
             FractalType::BurningShip => {
                 z = Complex::new(z.re.abs(), z.im.abs());
                 z = z * z + c;
@@ -58,12 +80,11 @@ pub struct FractalApp {
     width: usize,
     height: usize,
     texture_handle: Option<egui::TextureHandle>,
-    color_offset: u8,
+    params: FractalParams,
     last_drag_pos: Option<egui::Pos2>,
     last_interaction: Instant,
     is_interacting: bool,
     render_low_res: bool,
-    fractal_type: FractalType,
 }
 
 impl Default for FractalApp {
@@ -75,12 +96,11 @@ impl Default for FractalApp {
             width: 800,
             height: 600,
             texture_handle: None,
-            color_offset: 0,
+            params: FractalParams::default(),
             last_drag_pos: None,
             last_interaction: Instant::now(),
             is_interacting: false,
             render_low_res: false,
-            fractal_type: FractalType::Mandelbrot,
         }
     }
 }
@@ -184,27 +204,36 @@ impl App for FractalApp {
             ui.horizontal(|ui| {
                 if ui.button("💾 Save PNG").clicked() {
                     save_fractal(
-                        self.fractal_type,
                         self.center_x,
                         self.center_y,
                         self.zoom,
+                        self.params,
                         self.width,
                         self.height,
-                        self.color_offset,
                     );
                 }
+
+                if ui.button("🔄 Reset").clicked() {
+                    self.params = FractalParams::default();
+                    self.center_x = -0.5;
+                    self.center_y = 0.0;
+                    self.zoom = 1.0;
+                    self.texture_handle = None;
+                }
+
+                ui.separator();
                 ui.label("🎨 Color Offset:");
                 if ui
-                    .add(egui::Slider::new(&mut self.color_offset, 0..=255))
+                    .add(egui::Slider::new(&mut self.params.color_offset, 0..=255))
                     .changed()
                 {
                     self.texture_handle = None;
                 }
 
                 ui.separator();
-                ui.label("🧠 Fractal Type:");
+                ui.label("🔢 Fractal Type:");
                 egui::ComboBox::from_id_source("fractal_type")
-                    .selected_text(match self.fractal_type {
+                    .selected_text(match self.params.fractal_type {
                         FractalType::Mandelbrot => "Mandelbrot",
                         FractalType::Julia => "Julia",
                         FractalType::BurningShip => "Burning Ship",
@@ -212,35 +241,66 @@ impl App for FractalApp {
                     .show_ui(ui, |ui| {
                         if ui
                             .selectable_label(
-                                matches!(self.fractal_type, FractalType::Mandelbrot),
+                                matches!(self.params.fractal_type, FractalType::Mandelbrot),
                                 "Mandelbrot",
                             )
                             .clicked()
                         {
-                            self.fractal_type = FractalType::Mandelbrot;
+                            self.params.fractal_type = FractalType::Mandelbrot;
                             self.texture_handle = None;
                         }
                         if ui
                             .selectable_label(
-                                matches!(self.fractal_type, FractalType::Julia),
+                                matches!(self.params.fractal_type, FractalType::Julia),
                                 "Julia",
                             )
                             .clicked()
                         {
-                            self.fractal_type = FractalType::Julia;
+                            self.params.fractal_type = FractalType::Julia;
                             self.texture_handle = None;
                         }
                         if ui
                             .selectable_label(
-                                matches!(self.fractal_type, FractalType::BurningShip),
+                                matches!(self.params.fractal_type, FractalType::BurningShip),
                                 "Burning Ship",
                             )
                             .clicked()
                         {
-                            self.fractal_type = FractalType::BurningShip;
+                            self.params.fractal_type = FractalType::BurningShip;
                             self.texture_handle = None;
                         }
                     });
+
+                ui.separator();
+                ui.label("🔁 Iterations:");
+                if ui
+                    .add(egui::Slider::new(
+                        &mut self.params.max_iterations,
+                        10..=1000,
+                    ))
+                    .changed()
+                {
+                    self.texture_handle = None;
+                }
+
+                if self.params.fractal_type == FractalType::Julia {
+                    ui.separator();
+                    ui.label("➰ Julia Re:");
+                    if ui
+                        .add(egui::Slider::new(&mut self.params.julia_re, -1.5..=1.5))
+                        .changed()
+                    {
+                        self.texture_handle = None;
+                    }
+
+                    ui.label("➰ Julia Im:");
+                    if ui
+                        .add(egui::Slider::new(&mut self.params.julia_im, -1.5..=1.5))
+                        .changed()
+                    {
+                        self.texture_handle = None;
+                    }
+                }
             });
         });
 
@@ -263,14 +323,13 @@ impl App for FractalApp {
 
             if self.texture_handle.is_none() {
                 self.texture_handle = Some(render_fractal_to_texture_by_type(
-                    self.fractal_type,
                     ctx,
                     self.center_x,
                     self.center_y,
                     self.zoom,
+                    self.params,
                     render_width,
                     render_height,
-                    self.color_offset,
                 ));
             }
 
@@ -287,14 +346,13 @@ impl App for FractalApp {
 }
 
 fn render_fractal_to_texture_by_type(
-    fractal_type: FractalType,
     ctx: &egui::Context,
     center_x: f64,
     center_y: f64,
     zoom: f64,
+    params: FractalParams,
     width: usize,
     height: usize,
-    color_offset: u8,
 ) -> egui::TextureHandle {
     let mut imgbuf = ImageBuffer::new(width as u32, height as u32);
 
@@ -304,8 +362,8 @@ fn render_fractal_to_texture_by_type(
         .for_each(|(x, y, pixel)| {
             let cx = (x as f64 - width as f64 / 2.0) / (0.5 * zoom * width as f64) + center_x;
             let cy = (y as f64 - height as f64 / 2.0) / (0.5 * zoom * height as f64) + center_y;
-            let i = iterate_fractal(fractal_type, cx, cy, MAX_ITERATIONS);
-            *pixel = color_from_iterations(i, MAX_ITERATIONS, color_offset);
+            let i = iterate_fractal(cx, cy, &params);
+            *pixel = color_from_iterations(i, params.max_iterations, params.color_offset);
         });
 
     let size = [width, height];
@@ -319,13 +377,12 @@ fn render_fractal_to_texture_by_type(
 }
 
 fn save_fractal(
-    fractal_type: FractalType,
     center_x: f64,
     center_y: f64,
     zoom: f64,
+    params: FractalParams,
     width: usize,
     height: usize,
-    color_offset: u8,
 ) {
     let mut imgbuf = ImageBuffer::new(width as u32, height as u32);
 
@@ -335,21 +392,23 @@ fn save_fractal(
         .for_each(|(x, y, pixel)| {
             let cx = (x as f64 - width as f64 / 2.0) / (0.5 * zoom * width as f64) + center_x;
             let cy = (y as f64 - height as f64 / 2.0) / (0.5 * zoom * height as f64) + center_y;
-            let i = iterate_fractal(fractal_type, cx, cy, MAX_ITERATIONS);
-            *pixel = color_from_iterations(i, MAX_ITERATIONS, color_offset);
+            let i = iterate_fractal(cx, cy, &params);
+            *pixel = color_from_iterations(i, params.max_iterations, params.color_offset);
         });
 
-    let name = match fractal_type {
+    let name = match params.fractal_type {
         FractalType::Mandelbrot => "mandelbrot",
         FractalType::Julia => "julia",
         FractalType::BurningShip => "burningship",
     };
     let filename = format!(
         "{}_{:.2}_{:.2}_z{:.2}_c{}.png",
-        name, center_x, center_y, zoom, color_offset
+        name, center_x, center_y, zoom, params.color_offset
     );
-    imgbuf.save(&filename).expect("Failed to save image");
-    println!("Saved image to: {}", filename);
+    match imgbuf.save(&filename) {
+        Ok(()) => println!("Saved image to: {}", filename),
+        Err(e) => println!("Failed to save image to {}: {}", filename, e),
+    }
 }
 
 fn main() -> eframe::Result<()> {

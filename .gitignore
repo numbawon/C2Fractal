@@ -47,6 +47,9 @@ desktop.ini
 .vscode/
 .vs/
 
+# Agent scratch/worktrees (never commit)
+.claude/
+
 # Test output
 *.profraw
 
