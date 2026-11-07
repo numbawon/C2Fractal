@@ -274,7 +274,10 @@ impl App for FractalApp {
                 ui.separator();
                 ui.label("🔁 Iterations:");
                 if ui
-                    .add(egui::Slider::new(&mut self.params.max_iterations, 10..=1000))
+                    .add(egui::Slider::new(
+                        &mut self.params.max_iterations,
+                        10..=1000,
+                    ))
                     .changed()
                 {
                     self.texture_handle = None;
