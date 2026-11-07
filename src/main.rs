@@ -283,21 +283,23 @@ impl App for FractalApp {
                     self.texture_handle = None;
                 }
 
-                ui.separator();
-                ui.label("➰ Julia Re:");
-                if ui
-                    .add(egui::Slider::new(&mut self.params.julia_re, -1.5..=1.5))
-                    .changed()
-                {
-                    self.texture_handle = None;
-                }
+                if self.params.fractal_type == FractalType::Julia {
+                    ui.separator();
+                    ui.label("➰ Julia Re:");
+                    if ui
+                        .add(egui::Slider::new(&mut self.params.julia_re, -1.5..=1.5))
+                        .changed()
+                    {
+                        self.texture_handle = None;
+                    }
 
-                ui.label("➰ Julia Im:");
-                if ui
-                    .add(egui::Slider::new(&mut self.params.julia_im, -1.5..=1.5))
-                    .changed()
-                {
-                    self.texture_handle = None;
+                    ui.label("➰ Julia Im:");
+                    if ui
+                        .add(egui::Slider::new(&mut self.params.julia_im, -1.5..=1.5))
+                        .changed()
+                    {
+                        self.texture_handle = None;
+                    }
                 }
             });
         });
