@@ -165,8 +165,7 @@ impl App for FractalApp {
                 if let Some(last_pos) = self.last_drag_pos {
                     let delta = pos - last_pos;
                     self.center_x -= delta.x as f64 / (self.zoom * self.width as f64 / 2.0);
-                    self.center_y -=
-                        delta.y as f64 / (self.zoom * self.height as f64 / 2.0);
+                    self.center_y -= delta.y as f64 / (self.zoom * self.height as f64 / 2.0);
                     interaction_happened = true;
                 }
                 self.last_drag_pos = Some(pos);
