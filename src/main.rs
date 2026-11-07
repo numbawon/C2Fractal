@@ -110,12 +110,9 @@ impl App for FractalApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let input = ctx.input(|i| i.clone());
         let mut in_viewport = false;
-        match input.pointer.interact_pos() {
-            Some(pos) => {
-                let panel_top = ctx.screen_rect().top() + 32.0;
-                in_viewport = pos.y > panel_top;
-            }
-            None => {}
+        if let Some(pos) = input.pointer.interact_pos() {
+            let panel_top = ctx.screen_rect().top() + 32.0;
+            in_viewport = pos.y > panel_top;
         }
 
         // Detect interaction
@@ -134,28 +131,25 @@ impl App for FractalApp {
         }
 
         // Double-click zoom
-        match input.pointer.interact_pos() {
-            Some(pos) => {
-                let panel_top = ctx.screen_rect().top() + 32.0; // rough top bar height
-                if pos.y > panel_top
-                    && input.pointer.any_click()
-                    && input
-                        .pointer
-                        .button_double_clicked(egui::PointerButton::Primary)
-                {
-                    let norm_x = (pos.x / self.width as f32 - 0.5) * 2.0;
-                    let norm_y = (pos.y / self.height as f32 - 0.5) * 2.0;
-                    let dx = norm_x as f64 / self.zoom;
-                    let dy = norm_y as f64 / self.zoom;
-                    self.center_x += dx;
-                    self.center_y += dy;
+        if let Some(pos) = input.pointer.interact_pos() {
+            let panel_top = ctx.screen_rect().top() + 32.0; // rough top bar height
+            if pos.y > panel_top
+                && input.pointer.any_click()
+                && input
+                    .pointer
+                    .button_double_clicked(egui::PointerButton::Primary)
+            {
+                let norm_x = (pos.x / self.width as f32 - 0.5) * 2.0;
+                let norm_y = (pos.y / self.height as f32 - 0.5) * 2.0;
+                let dx = norm_x as f64 / self.zoom;
+                let dy = norm_y as f64 / self.zoom;
+                self.center_x += dx;
+                self.center_y += dy;
 
-                    let zoom_factor = if input.modifiers.shift { 0.5 } else { 2.0 };
-                    self.zoom *= zoom_factor;
-                    interaction_happened = true;
-                }
+                let zoom_factor = if input.modifiers.shift { 0.5 } else { 2.0 };
+                self.zoom *= zoom_factor;
+                interaction_happened = true;
             }
-            None => {}
         }
 
         // Mouse wheel zoom
@@ -167,21 +161,15 @@ impl App for FractalApp {
 
         // Mouse drag to pan
         if in_viewport && input.pointer.primary_down() {
-            match input.pointer.interact_pos() {
-                Some(pos) => {
-                    match self.last_drag_pos {
-                        Some(last_pos) => {
-                            let delta = pos - last_pos;
-                            self.center_x -= delta.x as f64 / (self.zoom * self.width as f64 / 2.0);
-                            self.center_y -=
-                                delta.y as f64 / (self.zoom * self.height as f64 / 2.0);
-                            interaction_happened = true;
-                        }
-                        None => {}
-                    }
-                    self.last_drag_pos = Some(pos);
+            if let Some(pos) = input.pointer.interact_pos() {
+                if let Some(last_pos) = self.last_drag_pos {
+                    let delta = pos - last_pos;
+                    self.center_x -= delta.x as f64 / (self.zoom * self.width as f64 / 2.0);
+                    self.center_y -=
+                        delta.y as f64 / (self.zoom * self.height as f64 / 2.0);
+                    interaction_happened = true;
                 }
-                None => {}
+                self.last_drag_pos = Some(pos);
             }
         } else {
             self.last_drag_pos = None;
