@@ -87,6 +87,8 @@ pub struct FractalApp {
     last_interaction: Instant,
     is_interacting: bool,
     render_low_res: bool,
+    /// True when `gpu::init` found a wgpu backend; `ui` then uses the GPU paint callback.
+    gpu_active: bool,
     /// Bottom edge of the control bar in points (updated per frame; replaces the +32.0 guess).
     panel_bottom: f32,
 }
@@ -105,20 +107,30 @@ impl Default for FractalApp {
             last_interaction: Instant::now(),
             is_interacting: false,
             render_low_res: false,
+            gpu_active: false,
             panel_bottom: 32.0,
         }
     }
 }
 
 impl FractalApp {
-    /// Create the app. Phase 4A: probe GPU backend availability (contract check);
-    /// the paint callback itself is wired in Phase 4C.
+    /// Create the app: probe the wgpu backend (Phase 4A) and remember whether the
+    /// GPU paint callback (Phase 4C) is usable; otherwise `ui` falls back to the CPU path.
     pub fn new(cc: &eframe::CreationContext) -> Self {
-        match gpu::init(cc) {
-            Ok(()) => eprintln!("GPU backend active (callback wiring: Phase 4C)"),
-            Err(e) => eprintln!("GPU backend unavailable, using CPU renderer: {e:?}"),
+        let gpu_active = match gpu::init(cc) {
+            Ok(()) => {
+                eprintln!("GPU backend active");
+                true
+            }
+            Err(e) => {
+                eprintln!("GPU backend unavailable, using CPU renderer: {e:?}");
+                false
+            }
+        };
+        Self {
+            gpu_active,
+            ..Self::default()
         }
-        Self::default()
     }
 }
 
@@ -308,11 +320,50 @@ impl App for FractalApp {
         self.panel_bottom = top_bar.response.rect.max.y;
 
         egui::CentralPanel::default().show(ui, |ui| {
-            // Use the same CPU rendering path for all fractal types
             let available = ui.available_size();
             self.width = available.x.max(1.0) as usize;
             self.height = available.y.max(1.0) as usize;
 
+            if self.gpu_active {
+                // Phase 4C: hand the frame to the GPU paint callback. The rect is in
+                // points; GpuParams carries the physical-pixel transform so the shader
+                // can map fragCoord back onto the complex plane.
+                let ppu = ui.ctx().pixels_per_point();
+                let rect = ui.available_rect_before_wrap();
+                let fractal_type = match self.params.fractal_type {
+                    FractalType::Mandelbrot => 1,
+                    FractalType::Julia => 0,
+                    FractalType::BurningShip => 2,
+                };
+                let params = gpu::GpuParams {
+                    fractal_type,
+                    max_iterations: self.params.max_iterations,
+                    color_offset: self.params.color_offset as u32,
+                    julia_re: self.params.julia_re as f32,
+                    julia_im: self.params.julia_im as f32,
+                    center_x: self.center_x as f32,
+                    center_y: self.center_y as f32,
+                    zoom: self.zoom as f32,
+                    origin_x: rect.min.x * ppu,
+                    origin_y: rect.min.y * ppu,
+                    width: rect.width() * ppu,
+                    height: rect.height() * ppu,
+                };
+                let callback = eframe::egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    gpu::GpuFractal { params },
+                );
+                // `new_paint_callback` already returns a finished
+                // `epaint::PaintCallback` whose type-erased `callback` field
+                // is `Arc<egui_wgpu::Callback>`. Wrap it a second time and
+                // the renderer's `downcast_ref::<Callback>()` (egui-wgpu
+                // `Renderer::update_buffers`/`render`) silently fails and
+                // neither `prepare` nor `paint` ever runs -> black screen.
+                ui.painter().add(egui::Shape::Callback(callback));
+                return;
+            }
+
+            // CPU fallback path (also the reference path used by Save PNG).
             let render_width = if self.render_low_res {
                 self.width / 2
             } else {

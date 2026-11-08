@@ -1,14 +1,16 @@
 # TODO — C2Fractal
 
-_Handoff from 2026-11-07 session. Branch: `phase-4-gpu`. Milestone status in the c2fractal skill + agent memory._
+_Handoff from 2026-11-08 session. Branch: `phase-4-gpu`. Milestone status in the c2fractal skill + agent memory._
 
 ## Where things stand
 
 - **P1 bugfixes** — merged. **P2 UI** — merged (#7). **P3 CI** — merged (#8).
-- **P4 GPU — Phase 4A done, 4B next.** eframe 0.27 → 0.37, wgpu → 30.0.1, and the `src/gpu.rs` paint-callback scaffold are in place on `phase-4-gpu`.
-- Push gate green (check / clippy `-D warnings` / fmt).
-- GUI smoke test passed 2026-11-07: window launches under eframe 0.37, Mandelbrot renders (CPU path), probe prints `GPU backend active (callback wiring: Phase 4C)`, full UIA element surface present. Pan, wheel/double-click zoom, iterations + color-offset sliders, Julia switch, Save PNG, Reset — all manually verified by the user, no issues.
-- **Uncommitted working tree:** `Cargo.toml`, `Cargo.lock`, `src/main.rs` (`ui.ctx()` inlined — see upgrade notes), `src/gpu.rs` (new).
+- **P4 — 4A committed (`c5b9478`), 4B + 4C implemented and verified, not yet committed.**
+- Push gate green on the current working tree (2026-11-08): fmt / check `-D warnings` / clippy / fmt --check, ARM64 MSVC.
+- Runtime verification (2026-11-08): GPU backend active and rendering; uniform buffer values verified against shader expectations; colormap identical to CPU.
+- **GPU-in-the-loop pixel test (decisive):** for all 1,753,024 texture pixels, faithful step-by-step f32 emulation of the exact shader math (pixel→complex mapping, iteration semantics, Bernstein-basis colormap) → **99.914% exact match vs faithful-f32 model, 99.906% vs f64 ground truth, 99.938% within L1≤3 of either.** Iteration deltas: d=0 at 99.907%, symmetric tail (±40 max, ~1,200 px) confined to the chaotic boundary. Residual 0.06% = isolated boundary pixels where GPU FMA contraction changes the orbit — expected f32 hardware behavior, not a defect.
+- The earlier smoke "PASS, mean_abs_diff 7–12, 13% beyond tolerance" was a **geometry artifact**: the f64 reference was 1600×1134 while the GPU texture is 1568×1118 (offset (16,0) in the capture; 16+1568+16=1600, 66+1118+16=1200, 1:1 device pixels) — a 2.0%/1.4% stretch, up to ~32 px misalignment. Cross-check: resampling the reference onto the correct grid → per-channel mean 1.75–2.28, ~3% beyond 10 (boundary blending only).
+- **Uncommitted working tree:** `src/gpu.rs` (+262 — `GpuFractal` CallbackTrait: init/prepare/paint, fullscreen WGSL shader, frozen `GpuParams` mirror; double-wrap fix), `src/main.rs` (+65/−48 — per-frame `GpuFractal` registration at main.rs:354, PrintWindow DC-sizing fix in capture path, CPU fallback kept, `dead_code` annotations gone).
 
 ## Serena MCP server — installed & registered (done this session)
 
@@ -20,25 +22,30 @@ _Handoff from 2026-11-07 session. Branch: `phase-4-gpu`. Milestone status in the
   - Hermes MCP stdio env is filtered (no USERPROFILE) — `env: {USERPROFILE, HOME}` is set in the server config; `Path.home()` needs it.
 - Residual (benign): "OpenSSL 3's legacy provider failed to load" warning on stderr — legacy algorithms unavailable, no impact on Serena.
 
-## First act next session
+## Up next (in order)
 
-- [ ] Commit the 4A checkpoint (bump + scaffold + ctx fixes). Suggested message: `Phase 4A: eframe 0.37 / wgpu 30 bump with GPU backend probe`
-- [ ] Then start 4B below.
+- [ ] Commit 4B+4C. Suggested message: `Phase 4B/4C: wgpu paint callback — fullscreen WGSL fractal shader with per-frame GpuParams push`
+- [ ] Push `phase-4-gpu` at the P4 milestone boundary — **awaiting user go-ahead**; merge only on explicit go-ahead.
+- [ ] Re-run the full GUI smoke test with the GPU path active: pan, wheel/double-click zoom, iterations + color-offset sliders, Julia switch, Save PNG, Reset. (The 2026-11-07 smoke ran the CPU path; GPU is now the renderer.)
+- [ ] Verify GPU shader in the non-default modes the in-the-loop test did not cover: Julia, BurningShip, `color_offset ≠ 0`, changed iteration count, deep zoom (f32 caps zoom depth vs CPU f64 — decide on a guard or a documented expectation).
+- [ ] Fix the smoke harness geometry so future CPU↔GPU comparisons are valid: render the f64 reference on the texture's own geometry, or crop the capture to the texture rect (offset (16,0), 1568×1118 device px).
+- [ ] Update the `c2fractal` skill milestone status to P4 done (memory line already updated).
 
-## Phase 4B — GPU paint callback (`src/gpu.rs`, per its Part B markers)
+## Phase 4B — GPU paint callback (`src/gpu.rs`) — done, uncommitted
 
-- [ ] `init()`: from `cc.wgpu_render_state` build + cache in `render_state.renderer.write().callback_resources`: WGSL shader module, pipeline layout, bind group layout, pipeline, uniform buffer, bind group
-- [ ] `prepare()`: `queue.write_buffer(&uniform_buffer, 0, bytemuck::bytes_of(&self.params))`
-- [ ] `paint()`: `set_pipeline` / `set_bind_group` / `draw(0..3, 0..1)` fullscreen triangle
-- [ ] WGSL uniform struct must mirror the **frozen** `GpuParams` `#[repr(C)]` layout field-for-field (order, names, types) — do not touch the Rust struct's layout
-- [ ] Fragment shader mirrors the CPU iteration/palette math (type 0/1/2 = Mandelbrot/Julia/BurningShip, `color_offset` palette, center/zoom → complex-plane mapping from `origin_x/y`, `width/height`)
+- [x] `init()`: resources built + cached in `callback_resources` (shader module, pipeline layout, bind group layout, pipeline, uniform buffer, bind group)
+- [x] `prepare()`: `queue.write_buffer(&uniform_buffer, 0, bytemuck::bytes_of(&self.params))`
+- [x] `paint()`: `set_pipeline` / `set_bind_group` / fullscreen-triangle draw
+- [x] WGSL uniform struct mirrors the frozen `GpuParams` `#[repr(C)]` layout field-for-field (verified via uniform-buffer readback)
+- [x] Fragment shader mirrors the CPU iteration/palette math (Mandelbrot/Julia/BurningShip, `color_offset` palette, center/zoom → complex-plane mapping) — verified pixel-wise for the default Mandelbrot view
 
-## Phase 4C — wire into `main.rs`
+## Phase 4C — wire into `main.rs` — done, uncommitted
 
-- [ ] Register `GpuFractal` per frame; push `GpuParams` from live UI state each frame
-- [ ] Keep CPU renderer as the fallback (the 4A probe already selects the path)
-- [ ] Remove the three `#[allow(dead_code)] // wired into main.rs in Phase 4C` annotations once wiring lands
-- [ ] Verify GPU output against CPU: same view/params → compare saved PNGs pixel-wise; then re-run the full GUI smoke test
+- [x] Register `GpuFractal` per frame; push `GpuParams` from live UI state each frame
+- [x] Keep CPU renderer as the fallback
+- [x] Remove the three `#[allow(dead_code)] // wired into main.rs in Phase 4C` annotations
+- [x] Verify GPU output against CPU — done via the in-the-loop pixel test (see "Where things stand"); remaining mode gaps listed in "Up next"
+- [ ] Re-run full GUI smoke test with the GPU path active
 
 ## Standing rules (recap)
 
