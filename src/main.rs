@@ -7,6 +7,8 @@ use num_complex::Complex;
 use rayon::prelude::*;
 use std::time::{Duration, Instant};
 
+mod gpu;
+
 #[derive(Copy, Clone, PartialEq)]
 pub enum FractalType {
     Mandelbrot,
@@ -85,6 +87,8 @@ pub struct FractalApp {
     last_interaction: Instant,
     is_interacting: bool,
     render_low_res: bool,
+    /// Bottom edge of the control bar in points (updated per frame; replaces the +32.0 guess).
+    panel_bottom: f32,
 }
 
 impl Default for FractalApp {
@@ -101,17 +105,29 @@ impl Default for FractalApp {
             last_interaction: Instant::now(),
             is_interacting: false,
             render_low_res: false,
+            panel_bottom: 32.0,
         }
     }
 }
 
-#[allow(non_snake_case)]
+impl FractalApp {
+    /// Create the app. Phase 4A: probe GPU backend availability (contract check);
+    /// the paint callback itself is wired in Phase 4C.
+    pub fn new(cc: &eframe::CreationContext) -> Self {
+        match gpu::init(cc) {
+            Ok(()) => eprintln!("GPU backend active (callback wiring: Phase 4C)"),
+            Err(e) => eprintln!("GPU backend unavailable, using CPU renderer: {e:?}"),
+        }
+        Self::default()
+    }
+}
+
 impl App for FractalApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let input = ctx.input(|i| i.clone());
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let input = ui.ctx().input(|i| i.clone());
+        let panel_top = self.panel_bottom;
         let mut in_viewport = false;
         if let Some(pos) = input.pointer.interact_pos() {
-            let panel_top = ctx.screen_rect().top() + 32.0;
             in_viewport = pos.y > panel_top;
         }
 
@@ -132,7 +148,6 @@ impl App for FractalApp {
 
         // Double-click zoom
         if let Some(pos) = input.pointer.interact_pos() {
-            let panel_top = ctx.screen_rect().top() + 32.0; // rough top bar height
             if pos.y > panel_top
                 && input.pointer.any_click()
                 && input
@@ -153,8 +168,8 @@ impl App for FractalApp {
         }
 
         // Mouse wheel zoom
-        if in_viewport && input.raw_scroll_delta.y != 0.0 {
-            let zoom_amount = 1.1_f64.powf(input.raw_scroll_delta.y as f64 / 100.0);
+        if in_viewport && input.smooth_scroll_delta.y != 0.0 {
+            let zoom_amount = 1.1_f64.powf(input.smooth_scroll_delta.y as f64 / 100.0);
             self.zoom *= zoom_amount;
             interaction_happened = true;
         }
@@ -187,7 +202,7 @@ impl App for FractalApp {
             self.texture_handle = None;
         }
 
-        egui::TopBottomPanel::top("controls").show(ctx, |ui| {
+        let top_bar = egui::Panel::top("controls").show(ui, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("💾 Save PNG").clicked() {
                     save_fractal(
@@ -219,7 +234,7 @@ impl App for FractalApp {
 
                 ui.separator();
                 ui.label("🔢 Fractal Type:");
-                egui::ComboBox::from_id_source("fractal_type")
+                egui::ComboBox::from_id_salt("fractal_type")
                     .selected_text(match self.params.fractal_type {
                         FractalType::Mandelbrot => "Mandelbrot",
                         FractalType::Julia => "Julia",
@@ -290,8 +305,9 @@ impl App for FractalApp {
                 }
             });
         });
+        self.panel_bottom = top_bar.response.rect.max.y;
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             // Use the same CPU rendering path for all fractal types
             let available = ui.available_size();
             self.width = available.x.max(1.0) as usize;
@@ -310,7 +326,7 @@ impl App for FractalApp {
 
             if self.texture_handle.is_none() {
                 self.texture_handle = Some(render_fractal_to_texture_by_type(
-                    ctx,
+                    ui.ctx(),
                     self.center_x,
                     self.center_y,
                     self.zoom,
@@ -407,6 +423,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Fractal Explorer",
         options,
-        Box::new(|_cc| Box::new(FractalApp::default())),
+        Box::new(|cc| Ok(Box::new(FractalApp::new(cc)))),
     )
 }
