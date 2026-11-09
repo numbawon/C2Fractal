@@ -225,7 +225,9 @@ impl App for FractalApp {
         }
 
         let top_bar = egui::Panel::top("controls").show(ui, |ui| {
-            ui.horizontal(|ui| {
+            // Outer wrap lets whole label+control groups drop to a new row on narrow
+            // windows; inner `ui.horizontal` groups keep each label glued to its control.
+            ui.horizontal_wrapped(|ui| {
                 if ui.button("💾 Save PNG").clicked() {
                     save_fractal(
                         self.center_x,
@@ -246,84 +248,94 @@ impl App for FractalApp {
                 }
 
                 ui.separator();
-                ui.label("🎨 Color Offset:");
-                if ui
-                    .add(egui::Slider::new(&mut self.params.color_offset, 0..=255))
-                    .changed()
-                {
-                    self.texture_handle = None;
-                }
+                ui.horizontal(|ui| {
+                    ui.label("🎨 Color Offset:");
+                    if ui
+                        .add(egui::Slider::new(&mut self.params.color_offset, 0..=255))
+                        .changed()
+                    {
+                        self.texture_handle = None;
+                    }
+                });
 
                 ui.separator();
-                ui.label("🔢 Fractal Type:");
-                egui::ComboBox::from_id_salt("fractal_type")
-                    .selected_text(match self.params.fractal_type {
-                        FractalType::Mandelbrot => "Mandelbrot",
-                        FractalType::Julia => "Julia",
-                        FractalType::BurningShip => "Burning Ship",
-                    })
-                    .show_ui(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("🔢 Fractal Type:");
+                    egui::ComboBox::from_id_salt("fractal_type")
+                        .selected_text(match self.params.fractal_type {
+                            FractalType::Mandelbrot => "Mandelbrot",
+                            FractalType::Julia => "Julia",
+                            FractalType::BurningShip => "Burning Ship",
+                        })
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(
+                                    matches!(self.params.fractal_type, FractalType::Mandelbrot),
+                                    "Mandelbrot",
+                                )
+                                .clicked()
+                            {
+                                self.params.fractal_type = FractalType::Mandelbrot;
+                                self.texture_handle = None;
+                            }
+                            if ui
+                                .selectable_label(
+                                    matches!(self.params.fractal_type, FractalType::Julia),
+                                    "Julia",
+                                )
+                                .clicked()
+                            {
+                                self.params.fractal_type = FractalType::Julia;
+                                self.texture_handle = None;
+                            }
+                            if ui
+                                .selectable_label(
+                                    matches!(self.params.fractal_type, FractalType::BurningShip),
+                                    "Burning Ship",
+                                )
+                                .clicked()
+                            {
+                                self.params.fractal_type = FractalType::BurningShip;
+                                self.texture_handle = None;
+                            }
+                        });
+                });
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("🔁 Iterations:");
+                    if ui
+                        .add(egui::Slider::new(
+                            &mut self.params.max_iterations,
+                            10..=1000,
+                        ))
+                        .changed()
+                    {
+                        self.texture_handle = None;
+                    }
+                });
+
+                if self.params.fractal_type == FractalType::Julia {
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label("➰ Julia Re:");
                         if ui
-                            .selectable_label(
-                                matches!(self.params.fractal_type, FractalType::Mandelbrot),
-                                "Mandelbrot",
-                            )
-                            .clicked()
+                            .add(egui::Slider::new(&mut self.params.julia_re, -1.5..=1.5))
+                            .changed()
                         {
-                            self.params.fractal_type = FractalType::Mandelbrot;
-                            self.texture_handle = None;
-                        }
-                        if ui
-                            .selectable_label(
-                                matches!(self.params.fractal_type, FractalType::Julia),
-                                "Julia",
-                            )
-                            .clicked()
-                        {
-                            self.params.fractal_type = FractalType::Julia;
-                            self.texture_handle = None;
-                        }
-                        if ui
-                            .selectable_label(
-                                matches!(self.params.fractal_type, FractalType::BurningShip),
-                                "Burning Ship",
-                            )
-                            .clicked()
-                        {
-                            self.params.fractal_type = FractalType::BurningShip;
                             self.texture_handle = None;
                         }
                     });
 
-                ui.separator();
-                ui.label("🔁 Iterations:");
-                if ui
-                    .add(egui::Slider::new(
-                        &mut self.params.max_iterations,
-                        10..=1000,
-                    ))
-                    .changed()
-                {
-                    self.texture_handle = None;
-                }
-
-                if self.params.fractal_type == FractalType::Julia {
-                    ui.separator();
-                    ui.label("➰ Julia Re:");
-                    if ui
-                        .add(egui::Slider::new(&mut self.params.julia_re, -1.5..=1.5))
-                        .changed()
-                    {
-                        self.texture_handle = None;
-                    }
-
-                    ui.label("➰ Julia Im:");
-                    if ui
-                        .add(egui::Slider::new(&mut self.params.julia_im, -1.5..=1.5))
-                        .changed()
-                    {
-                        self.texture_handle = None;
-                    }
+                    ui.horizontal(|ui| {
+                        ui.label("➰ Julia Im:");
+                        if ui
+                            .add(egui::Slider::new(&mut self.params.julia_im, -1.5..=1.5))
+                            .changed()
+                        {
+                            self.texture_handle = None;
+                        }
+                    });
                 }
             });
         });
@@ -479,7 +491,9 @@ fn save_fractal(
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size(egui::vec2(800.0, 600.0)),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size(egui::vec2(800.0, 600.0))
+            .with_min_inner_size(egui::vec2(480.0, 320.0)),
         ..Default::default()
     };
 
