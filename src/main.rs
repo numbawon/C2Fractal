@@ -75,6 +75,16 @@ fn color_from_iterations(i: u32, max_iterations: u32, color_offset: u8) -> Rgb<u
     ])
 }
 
+/// Hard ceiling for the GPU (f32) renderer's zoom. The shader maps each pixel to
+/// the complex plane in f32: the per-pixel step is 2/(zoom * tex_w) while the f32
+/// ULP of a coordinate near |c| is |c| * 2^-23, so adjacent pixels collapse to the
+/// same f32 value (banding, then a frozen image) once zoom exceeds
+/// 2^24 / (|center| * tex_w) — about 4.4k at 4K width with |center| >= 1, about
+/// 21k at 1080p near the default center. `MAX_GPU_ZOOM` sits at least 8x below
+/// the worst-case degeneration; beyond it we fall through to the CPU (f64)
+/// renderer, which is also the path Save PNG uses, so deep zoom stays exact.
+const MAX_GPU_ZOOM: f64 = 500.0;
+
 pub struct FractalApp {
     zoom: f64,
     center_x: f64,
@@ -324,7 +334,9 @@ impl App for FractalApp {
             self.width = available.x.max(1.0) as usize;
             self.height = available.y.max(1.0) as usize;
 
-            if self.gpu_active {
+            // The GPU path serves while zoom stays within f32 validity (see
+            // MAX_GPU_ZOOM); beyond it the frame falls through to the CPU path.
+            if self.gpu_active && self.zoom <= MAX_GPU_ZOOM {
                 // Phase 4C: hand the frame to the GPU paint callback. The rect is in
                 // points; GpuParams carries the physical-pixel transform so the shader
                 // can map fragCoord back onto the complex plane.

@@ -41,7 +41,7 @@ pub struct GpuParams {
 
 /// The paint callback. Holds only the current frame's params; all GPU objects
 /// live in [`CallbackResources`] (TypeMap), created once by [`init`].
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone)]
 pub struct GpuFractal {
     pub params: GpuParams,
 }
