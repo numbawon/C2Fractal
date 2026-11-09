@@ -85,6 +85,77 @@ fn color_from_iterations(i: u32, max_iterations: u32, color_offset: u8) -> Rgb<u
 /// renderer, which is also the path Save PNG uses, so deep zoom stays exact.
 const MAX_GPU_ZOOM: f64 = 500.0;
 
+/// Fixed outer width of the fractal-type combobox, sized so the longest
+/// entry ("Burning Ship") fits with headroom. A fixed width also keeps the
+/// group's width deterministic for the wrapping control bar.
+const FRACTAL_COMBO_WIDTH: f32 = 150.0;
+
+/// Adds a label+control pair to the wrapping control bar, keeping the pair
+/// on one row while letting the pair wrap to a new row as a unit.
+///
+/// The pair is allocated an explicit width measured from the label and the
+/// control's own width, so the wrapping layout sees the group's true size.
+/// A bare `ui.horizontal` scope cannot be used here: it would report the
+/// full remaining row width to the wrapping parent and overflow the panel
+/// edge on narrow windows instead of triggering a wrap.
+fn control_group<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    control_width: f32,
+    add_control: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let spacing = ui.spacing();
+    let label_width = ui.ctx().fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                label.to_string(),
+                egui::TextStyle::Body.resolve(ui.style()),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x
+    });
+    ui.allocate_ui_with_layout(
+        egui::vec2(
+            label_width + spacing.item_spacing.x + control_width,
+            spacing.interact_size.y,
+        ),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.label(label);
+            add_control(ui)
+        },
+    )
+    .inner
+}
+
+/// Full horizontal footprint of an [`egui::Slider`]: the rail
+/// (`slider_width`) plus item spacing, plus the value display that
+/// `Slider::ui` appends after the rail. That display is a button with a
+/// minimum width of `interact_size.x` that grows with the value text, so
+/// `longest_value_text` must be the widest text the range can show (e.g.
+/// "1000" for 10..=1000, "-1.500" for -1.5..=1.5 at the slider's auto
+/// decimals). It is measured with the same font machinery the widget
+/// uses, so the wrapping control bar sees the control's true width
+/// instead of under-allocating it and clipping the value display on
+/// narrow windows.
+fn slider_footprint(ui: &mut egui::Ui, longest_value_text: &str) -> f32 {
+    let spacing = ui.spacing();
+    let text_width = ui.ctx().fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                longest_value_text.to_string(),
+                ui.style().drag_value_text_style.resolve(ui.style()),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x
+    });
+    let display_width =
+        (text_width + ui.style().spacing.button_padding.x * 2.0).max(spacing.interact_size.x);
+    spacing.slider_width + spacing.item_spacing.x + display_width
+}
+
 pub struct FractalApp {
     zoom: f64,
     center_x: f64,
@@ -225,8 +296,12 @@ impl App for FractalApp {
         }
 
         let top_bar = egui::Panel::top("controls").show(ui, |ui| {
-            // Outer wrap lets whole label+control groups drop to a new row on narrow
-            // windows; inner `ui.horizontal` groups keep each label glued to its control.
+            // The outer wrap drops groups to new rows on narrow windows. Each
+            // label+control pair is allocated its measured width (see
+            // `control_group`) so the wrapping layout sees the group's true
+            // size; a bare `ui.horizontal` scope would report the full
+            // remaining row width and overflow the panel edge instead of
+            // wrapping.
             ui.horizontal_wrapped(|ui| {
                 if ui.button("💾 Save PNG").clicked() {
                     save_fractal(
@@ -248,8 +323,8 @@ impl App for FractalApp {
                 }
 
                 ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("🎨 Color Offset:");
+                let color_offset_width = slider_footprint(ui, "255");
+                control_group(ui, "🎨 Color Offset:", color_offset_width, |ui| {
                     if ui
                         .add(egui::Slider::new(&mut self.params.color_offset, 0..=255))
                         .changed()
@@ -259,9 +334,9 @@ impl App for FractalApp {
                 });
 
                 ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("🔢 Fractal Type:");
+                control_group(ui, "🔢 Fractal Type:", FRACTAL_COMBO_WIDTH, |ui| {
                     egui::ComboBox::from_id_salt("fractal_type")
+                        .width(FRACTAL_COMBO_WIDTH)
                         .selected_text(match self.params.fractal_type {
                             FractalType::Mandelbrot => "Mandelbrot",
                             FractalType::Julia => "Julia",
@@ -302,8 +377,8 @@ impl App for FractalApp {
                 });
 
                 ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("🔁 Iterations:");
+                let iterations_width = slider_footprint(ui, "1000");
+                control_group(ui, "🔁 Iterations:", iterations_width, |ui| {
                     if ui
                         .add(egui::Slider::new(
                             &mut self.params.max_iterations,
@@ -317,8 +392,8 @@ impl App for FractalApp {
 
                 if self.params.fractal_type == FractalType::Julia {
                     ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.label("➰ Julia Re:");
+                    let julia_re_width = slider_footprint(ui, "-1.500");
+                    control_group(ui, "➰ Julia Re:", julia_re_width, |ui| {
                         if ui
                             .add(egui::Slider::new(&mut self.params.julia_re, -1.5..=1.5))
                             .changed()
@@ -327,8 +402,8 @@ impl App for FractalApp {
                         }
                     });
 
-                    ui.horizontal(|ui| {
-                        ui.label("➰ Julia Im:");
+                    let julia_im_width = slider_footprint(ui, "-1.500");
+                    control_group(ui, "➰ Julia Im:", julia_im_width, |ui| {
                         if ui
                             .add(egui::Slider::new(&mut self.params.julia_im, -1.5..=1.5))
                             .changed()
