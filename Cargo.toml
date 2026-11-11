@@ -4,10 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-eframe = "0.27"
-egui = "0.27"
-egui-wgpu = "0.27"
-wgpu = "0.17.1"
+eframe = { version = "0.37", features = ["persistence"] }
+egui = "0.37"
+wgpu = "30"
 image = "0.24"
 num-complex = "0.4"
 rayon = "1.7"

@@ -7,6 +7,8 @@ use num_complex::Complex;
 use rayon::prelude::*;
 use std::time::{Duration, Instant};
 
+mod gpu;
+
 #[derive(Copy, Clone, PartialEq)]
 pub enum FractalType {
     Mandelbrot,
@@ -73,6 +75,87 @@ fn color_from_iterations(i: u32, max_iterations: u32, color_offset: u8) -> Rgb<u
     ])
 }
 
+/// Hard ceiling for the GPU (f32) renderer's zoom. The shader maps each pixel to
+/// the complex plane in f32: the per-pixel step is 2/(zoom * tex_w) while the f32
+/// ULP of a coordinate near |c| is |c| * 2^-23, so adjacent pixels collapse to the
+/// same f32 value (banding, then a frozen image) once zoom exceeds
+/// 2^24 / (|center| * tex_w) — about 4.4k at 4K width with |center| >= 1, about
+/// 21k at 1080p near the default center. `MAX_GPU_ZOOM` sits at least 8x below
+/// the worst-case degeneration; beyond it we fall through to the CPU (f64)
+/// renderer, which is also the path Save PNG uses, so deep zoom stays exact.
+const MAX_GPU_ZOOM: f64 = 500.0;
+
+/// Fixed outer width of the fractal-type combobox, sized so the longest
+/// entry ("Burning Ship") fits with headroom. A fixed width also keeps the
+/// group's width deterministic for the wrapping control bar.
+const FRACTAL_COMBO_WIDTH: f32 = 150.0;
+
+/// Adds a label+control pair to the wrapping control bar, keeping the pair
+/// on one row while letting the pair wrap to a new row as a unit.
+///
+/// The pair is allocated an explicit width measured from the label and the
+/// control's own width, so the wrapping layout sees the group's true size.
+/// A bare `ui.horizontal` scope cannot be used here: it would report the
+/// full remaining row width to the wrapping parent and overflow the panel
+/// edge on narrow windows instead of triggering a wrap.
+fn control_group<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    control_width: f32,
+    add_control: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let spacing = ui.spacing();
+    let label_width = ui.ctx().fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                label.to_string(),
+                egui::TextStyle::Body.resolve(ui.style()),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x
+    });
+    ui.allocate_ui_with_layout(
+        egui::vec2(
+            label_width + spacing.item_spacing.x + control_width,
+            spacing.interact_size.y,
+        ),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.label(label);
+            add_control(ui)
+        },
+    )
+    .inner
+}
+
+/// Full horizontal footprint of an [`egui::Slider`]: the rail
+/// (`slider_width`) plus item spacing, plus the value display that
+/// `Slider::ui` appends after the rail. That display is a button with a
+/// minimum width of `interact_size.x` that grows with the value text, so
+/// `longest_value_text` must be the widest text the range can show (e.g.
+/// "1000" for 10..=1000, "-1.500" for -1.5..=1.5 at the slider's auto
+/// decimals). It is measured with the same font machinery the widget
+/// uses, so the wrapping control bar sees the control's true width
+/// instead of under-allocating it and clipping the value display on
+/// narrow windows.
+fn slider_footprint(ui: &mut egui::Ui, longest_value_text: &str) -> f32 {
+    let spacing = ui.spacing();
+    let text_width = ui.ctx().fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                longest_value_text.to_string(),
+                ui.style().drag_value_text_style.resolve(ui.style()),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x
+    });
+    let display_width =
+        (text_width + ui.style().spacing.button_padding.x * 2.0).max(spacing.interact_size.x);
+    spacing.slider_width + spacing.item_spacing.x + display_width
+}
+
 pub struct FractalApp {
     zoom: f64,
     center_x: f64,
@@ -85,6 +168,10 @@ pub struct FractalApp {
     last_interaction: Instant,
     is_interacting: bool,
     render_low_res: bool,
+    /// True when `gpu::init` found a wgpu backend; `ui` then uses the GPU paint callback.
+    gpu_active: bool,
+    /// Bottom edge of the control bar in points (updated per frame; replaces the +32.0 guess).
+    panel_bottom: f32,
 }
 
 impl Default for FractalApp {
@@ -101,17 +188,39 @@ impl Default for FractalApp {
             last_interaction: Instant::now(),
             is_interacting: false,
             render_low_res: false,
+            gpu_active: false,
+            panel_bottom: 32.0,
         }
     }
 }
 
-#[allow(non_snake_case)]
+impl FractalApp {
+    /// Create the app: probe the wgpu backend (Phase 4A) and remember whether the
+    /// GPU paint callback (Phase 4C) is usable; otherwise `ui` falls back to the CPU path.
+    pub fn new(cc: &eframe::CreationContext) -> Self {
+        let gpu_active = match gpu::init(cc) {
+            Ok(()) => {
+                eprintln!("GPU backend active");
+                true
+            }
+            Err(e) => {
+                eprintln!("GPU backend unavailable, using CPU renderer: {e:?}");
+                false
+            }
+        };
+        Self {
+            gpu_active,
+            ..Self::default()
+        }
+    }
+}
+
 impl App for FractalApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let input = ctx.input(|i| i.clone());
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let input = ui.ctx().input(|i| i.clone());
+        let panel_top = self.panel_bottom;
         let mut in_viewport = false;
         if let Some(pos) = input.pointer.interact_pos() {
-            let panel_top = ctx.screen_rect().top() + 32.0;
             in_viewport = pos.y > panel_top;
         }
 
@@ -132,7 +241,6 @@ impl App for FractalApp {
 
         // Double-click zoom
         if let Some(pos) = input.pointer.interact_pos() {
-            let panel_top = ctx.screen_rect().top() + 32.0; // rough top bar height
             if pos.y > panel_top
                 && input.pointer.any_click()
                 && input
@@ -153,8 +261,8 @@ impl App for FractalApp {
         }
 
         // Mouse wheel zoom
-        if in_viewport && input.raw_scroll_delta.y != 0.0 {
-            let zoom_amount = 1.1_f64.powf(input.raw_scroll_delta.y as f64 / 100.0);
+        if in_viewport && input.smooth_scroll_delta.y != 0.0 {
+            let zoom_amount = 1.1_f64.powf(input.smooth_scroll_delta.y as f64 / 100.0);
             self.zoom *= zoom_amount;
             interaction_happened = true;
         }
@@ -187,8 +295,14 @@ impl App for FractalApp {
             self.texture_handle = None;
         }
 
-        egui::TopBottomPanel::top("controls").show(ctx, |ui| {
-            ui.horizontal(|ui| {
+        let top_bar = egui::Panel::top("controls").show(ui, |ui| {
+            // The outer wrap drops groups to new rows on narrow windows. Each
+            // label+control pair is allocated its measured width (see
+            // `control_group`) so the wrapping layout sees the group's true
+            // size; a bare `ui.horizontal` scope would report the full
+            // remaining row width and overflow the panel edge instead of
+            // wrapping.
+            ui.horizontal_wrapped(|ui| {
                 if ui.button("💾 Save PNG").clicked() {
                     save_fractal(
                         self.center_x,
@@ -209,94 +323,146 @@ impl App for FractalApp {
                 }
 
                 ui.separator();
-                ui.label("🎨 Color Offset:");
-                if ui
-                    .add(egui::Slider::new(&mut self.params.color_offset, 0..=255))
-                    .changed()
-                {
-                    self.texture_handle = None;
-                }
+                let color_offset_width = slider_footprint(ui, "255");
+                control_group(ui, "🎨 Color Offset:", color_offset_width, |ui| {
+                    if ui
+                        .add(egui::Slider::new(&mut self.params.color_offset, 0..=255))
+                        .changed()
+                    {
+                        self.texture_handle = None;
+                    }
+                });
 
                 ui.separator();
-                ui.label("🔢 Fractal Type:");
-                egui::ComboBox::from_id_source("fractal_type")
-                    .selected_text(match self.params.fractal_type {
-                        FractalType::Mandelbrot => "Mandelbrot",
-                        FractalType::Julia => "Julia",
-                        FractalType::BurningShip => "Burning Ship",
-                    })
-                    .show_ui(ui, |ui| {
+                control_group(ui, "🔢 Fractal Type:", FRACTAL_COMBO_WIDTH, |ui| {
+                    egui::ComboBox::from_id_salt("fractal_type")
+                        .width(FRACTAL_COMBO_WIDTH)
+                        .selected_text(match self.params.fractal_type {
+                            FractalType::Mandelbrot => "Mandelbrot",
+                            FractalType::Julia => "Julia",
+                            FractalType::BurningShip => "Burning Ship",
+                        })
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(
+                                    matches!(self.params.fractal_type, FractalType::Mandelbrot),
+                                    "Mandelbrot",
+                                )
+                                .clicked()
+                            {
+                                self.params.fractal_type = FractalType::Mandelbrot;
+                                self.texture_handle = None;
+                            }
+                            if ui
+                                .selectable_label(
+                                    matches!(self.params.fractal_type, FractalType::Julia),
+                                    "Julia",
+                                )
+                                .clicked()
+                            {
+                                self.params.fractal_type = FractalType::Julia;
+                                self.texture_handle = None;
+                            }
+                            if ui
+                                .selectable_label(
+                                    matches!(self.params.fractal_type, FractalType::BurningShip),
+                                    "Burning Ship",
+                                )
+                                .clicked()
+                            {
+                                self.params.fractal_type = FractalType::BurningShip;
+                                self.texture_handle = None;
+                            }
+                        });
+                });
+
+                ui.separator();
+                let iterations_width = slider_footprint(ui, "1000");
+                control_group(ui, "🔁 Iterations:", iterations_width, |ui| {
+                    if ui
+                        .add(egui::Slider::new(
+                            &mut self.params.max_iterations,
+                            10..=1000,
+                        ))
+                        .changed()
+                    {
+                        self.texture_handle = None;
+                    }
+                });
+
+                if self.params.fractal_type == FractalType::Julia {
+                    ui.separator();
+                    let julia_re_width = slider_footprint(ui, "-1.500");
+                    control_group(ui, "➰ Julia Re:", julia_re_width, |ui| {
                         if ui
-                            .selectable_label(
-                                matches!(self.params.fractal_type, FractalType::Mandelbrot),
-                                "Mandelbrot",
-                            )
-                            .clicked()
+                            .add(egui::Slider::new(&mut self.params.julia_re, -1.5..=1.5))
+                            .changed()
                         {
-                            self.params.fractal_type = FractalType::Mandelbrot;
-                            self.texture_handle = None;
-                        }
-                        if ui
-                            .selectable_label(
-                                matches!(self.params.fractal_type, FractalType::Julia),
-                                "Julia",
-                            )
-                            .clicked()
-                        {
-                            self.params.fractal_type = FractalType::Julia;
-                            self.texture_handle = None;
-                        }
-                        if ui
-                            .selectable_label(
-                                matches!(self.params.fractal_type, FractalType::BurningShip),
-                                "Burning Ship",
-                            )
-                            .clicked()
-                        {
-                            self.params.fractal_type = FractalType::BurningShip;
                             self.texture_handle = None;
                         }
                     });
 
-                ui.separator();
-                ui.label("🔁 Iterations:");
-                if ui
-                    .add(egui::Slider::new(
-                        &mut self.params.max_iterations,
-                        10..=1000,
-                    ))
-                    .changed()
-                {
-                    self.texture_handle = None;
-                }
-
-                if self.params.fractal_type == FractalType::Julia {
-                    ui.separator();
-                    ui.label("➰ Julia Re:");
-                    if ui
-                        .add(egui::Slider::new(&mut self.params.julia_re, -1.5..=1.5))
-                        .changed()
-                    {
-                        self.texture_handle = None;
-                    }
-
-                    ui.label("➰ Julia Im:");
-                    if ui
-                        .add(egui::Slider::new(&mut self.params.julia_im, -1.5..=1.5))
-                        .changed()
-                    {
-                        self.texture_handle = None;
-                    }
+                    let julia_im_width = slider_footprint(ui, "-1.500");
+                    control_group(ui, "➰ Julia Im:", julia_im_width, |ui| {
+                        if ui
+                            .add(egui::Slider::new(&mut self.params.julia_im, -1.5..=1.5))
+                            .changed()
+                        {
+                            self.texture_handle = None;
+                        }
+                    });
                 }
             });
         });
+        self.panel_bottom = top_bar.response.rect.max.y;
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // Use the same CPU rendering path for all fractal types
+        egui::CentralPanel::default().show(ui, |ui| {
             let available = ui.available_size();
             self.width = available.x.max(1.0) as usize;
             self.height = available.y.max(1.0) as usize;
 
+            // The GPU path serves while zoom stays within f32 validity (see
+            // MAX_GPU_ZOOM); beyond it the frame falls through to the CPU path.
+            if self.gpu_active && self.zoom <= MAX_GPU_ZOOM {
+                // Phase 4C: hand the frame to the GPU paint callback. The rect is in
+                // points; GpuParams carries the physical-pixel transform so the shader
+                // can map fragCoord back onto the complex plane.
+                let ppu = ui.ctx().pixels_per_point();
+                let rect = ui.available_rect_before_wrap();
+                let fractal_type = match self.params.fractal_type {
+                    FractalType::Mandelbrot => 1,
+                    FractalType::Julia => 0,
+                    FractalType::BurningShip => 2,
+                };
+                let params = gpu::GpuParams {
+                    fractal_type,
+                    max_iterations: self.params.max_iterations,
+                    color_offset: self.params.color_offset as u32,
+                    julia_re: self.params.julia_re as f32,
+                    julia_im: self.params.julia_im as f32,
+                    center_x: self.center_x as f32,
+                    center_y: self.center_y as f32,
+                    zoom: self.zoom as f32,
+                    origin_x: rect.min.x * ppu,
+                    origin_y: rect.min.y * ppu,
+                    width: rect.width() * ppu,
+                    height: rect.height() * ppu,
+                };
+                let callback = eframe::egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    gpu::GpuFractal { params },
+                );
+                // `new_paint_callback` already returns a finished
+                // `epaint::PaintCallback` whose type-erased `callback` field
+                // is `Arc<egui_wgpu::Callback>`. Wrap it a second time and
+                // the renderer's `downcast_ref::<Callback>()` (egui-wgpu
+                // `Renderer::update_buffers`/`render`) silently fails and
+                // neither `prepare` nor `paint` ever runs -> black screen.
+                ui.painter().add(egui::Shape::Callback(callback));
+                return;
+            }
+
+            // CPU fallback path (also the reference path used by Save PNG).
             let render_width = if self.render_low_res {
                 self.width / 2
             } else {
@@ -310,7 +476,7 @@ impl App for FractalApp {
 
             if self.texture_handle.is_none() {
                 self.texture_handle = Some(render_fractal_to_texture_by_type(
-                    ctx,
+                    ui.ctx(),
                     self.center_x,
                     self.center_y,
                     self.zoom,
@@ -400,13 +566,15 @@ fn save_fractal(
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size(egui::vec2(800.0, 600.0)),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size(egui::vec2(800.0, 600.0))
+            .with_min_inner_size(egui::vec2(480.0, 320.0)),
         ..Default::default()
     };
 
     eframe::run_native(
         "Fractal Explorer",
         options,
-        Box::new(|_cc| Box::new(FractalApp::default())),
+        Box::new(|cc| Ok(Box::new(FractalApp::new(cc)))),
     )
 }
