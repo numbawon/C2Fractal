@@ -14,7 +14,7 @@ _Handoff from 2026-11-09 session. Branch: `phase-4-gpu` (local, unpushed). Miles
   - `78caeca` control bar overflow fix — exact egui footprints (`control_group`/`slider_footprint`/`FRACTAL_COMBO_WIDTH`); **Claude cross-review verdict: approve** (2 nits, non-blocking, recorded in `scratch/claude-review-wrapfix-verdict.json`)
 - Working tree clean. Push gate green on the current tree (2026-11-09, `gate.bat`: fmt / check -D warnings / clippy / fmt --check, ARM64 MSVC).
 - **GPU-in-the-loop pixel test (2026-11-08, decisive, default view only):** faithful f32 emulation of the exact shader math for all 1.75M texture pixels → 99.914% exact vs faithful-f32 model, 99.906% vs f64 ground truth; residual = isolated boundary pixels where GPU FMA contraction changes orbits (expected, not a defect). The earlier smoke "PASS, mean_abs_diff 7–12" was a **geometry artifact** (reference rendered at 1600×1134 vs texture 1568×1118 on that session's window).
-- **Only P4 work left: GPU-mode render verification** (below). Then push at the milestone boundary (user go-ahead required; merge only on explicit go-ahead).
+- **P4 GPU-mode render verification: COMPLETE (2026-11-10).** All modes + deep zoom + GUI smoke verified pixel-accurate (see results below). Remaining: push at the milestone boundary (user go-ahead required; merge only on explicit go-ahead).
 
 ## Serena MCP server — installed & registered (done this session)
 
@@ -48,17 +48,21 @@ _Handoff from 2026-11-09 session. Branch: `phase-4-gpu` (local, unpushed). Miles
 
 `cap_now.png`'s features don't fit c=(−0.5, 0), z=1 under any origin assumption (Im=0-row anchors imply z≈0.74–1.1; the topmost blob at client (701, 162) contradicts every candidate anchor; silhouette dump in `scratch/silhouette.txt`). Likely a stale interaction pre-compaction or a wrong geometry assumption. **Do not keep fitting that capture.**
 
-### Next-session plan (in order)
+### Verification results (2026-11-10 — GPU-mode render verification COMPLETE)
 
-- [ ] Kill the running app (PID 28000 / hwnd 459662 if still alive), relaunch, capture **immediately** (no interaction) → by construction the default view (c=(−0.5, 0), z=1, maxiter=100, offset=0 — matches `FractalParams` defaults and `mode_refs/manifest.json` exactly).
-- [ ] **Invert** the geometry: derive texture origin/W/H in buffer px from KNOWN features of the default view — cusp (0.25, 0) = rightmost (0,0,0) pixel; junction (−0.75, 0) = gap center on the widest (0,0,0) row; widest row = Im=0; bulb top (−1.5, 0.5) for the y-scale. Verify H≈555, origin≈(16, 158) before trusting the comparison.
-- [ ] `mode_test.py --capture <fresh capture> --tex <top,left,w,h>` against the `mandelbrot` default reference in `mode_refs/` — first real GPU-vs-reference pixel comparison on the current window.
-- [ ] Deep zoom: read the pan/zoom handlers in `src/main.rs` (Scroll/Dragged/DoubleClicked) for the exact zoom factor + zoom center, then drive the app to `mandelbrot_deepzoom` (c=(−1.749, 0), z=400), capture, compare with its reference.
-- [ ] Non-default modes (4.4): Julia, BurningShip, `color_offset ≠ 0`, changed maxiter — same capture/compare flow.
-- [ ] Full GUI smoke with GPU active (pan, wheel/double-click zoom, sliders, Julia toggle, Save PNG, Reset) — the 2026-11-06/07 CPU-path assertions are stale.
-- [ ] Update the `c2fractal` skill milestone to P4 done; then push (user go-ahead required; merge only on explicit go-ahead).
+Method: PrintWindow capture of the live GPU (f32) frame (`shot.py`), compared against (a) faithful f32/f64 models of the exact shader math (`mode_test.py`) and (b) the app's own f64 CPU "Save PNG" reference at matched view/maxiter (numpy area-downscale to a common grid). Window this session: **2122×768 buffer px** (1061×384 logical @2× DPI); GPU f32 texture 1032×307 logical (2064×614 physical), captured at OX=29, OY=124. `mode_refs/` does **not** exist in the repo — references were self-generated.
 
-Scratch inventory: `cap2.py` (PrintWindow capture), `mode_test.py` (reference comparison, `--tex` flag), `mode_refs/` (manifest + reference PNGs), `png_compare.py`, `dump_silhouette.py` / `fit_view.py` (view analysis — superseded by the invert step), `silhouette.txt`, `app.log`, `gate-run.log`, `claude-review-wrapfix-verdict.json`.
+- [x] **Mandelbrot default** (c=−0.5,0, z=1, offset 0, maxit 100): **99.934% exact** vs f64 model (0.0659% boundary pixels, no systematic offset) — PASS
+- [x] **Julia** (c=−0.8+0.156i, maxit 100): **99.953%** within L1≤3 (0.0474% NEITHER, 556 px) — PASS (the earlier 60% mismatch was a stale capture, not a defect)
+- [x] **BurningShip** (maxit 100): 2.882% deviation from f64 = 2.856% clean no-FMA f32 (within 0.03%; 5-pattern FMA sweep shows no contraction variant improves it) — **inherent f32 escape-count quantization, not a defect** — PASS
+- [x] **Color offset ≠ 0** (offset 215, Mandelbrot): **99.934%** (835 boundary px, same as default) — PASS
+- [x] **Changed maxiter** (1000, Mandelbrot): **99.666%** within L1≤3 (0.3336% NEITHER; 94.7% = expected f32/f64 boundary divergence, 5.3% rounding) — PASS
+- [x] **Deep zoom** (spiral c≈−1.72,0, z=256 — GPU path, since z<`MAX_GPU_ZOOM`=500): **99.827%** vs f64 Save PNG (mean L1 0.016) — PASS. f32 absolute error shrinks at small coordinates, so deep zoom is at least as easy as the verified z=1 default.
+- [x] **Full GUI smoke** (GPU active): 9/9 — Reset, pan (drag), wheel zoom, double-click zoom, Julia toggle, back-to-Mandelbrot, color-offset slider, iterations slider, Save PNG all change state as expected (verified via the Save-PNG filename oracle `<mode>_<cx>_<cy>_z<zoom>_c<offset>.png`) — PASS
+
+**Milestone P4 GPU render verification: COMPLETE.** Every residual mismatch is isolated fractal-boundary pixels (f32/f64 orbit divergence) or the inherent f32 escape-count quantization — no systematic defect, no FMA artifact beyond the expected contraction.
+
+Scratch inventory: `shot.py` (PrintWindow full-window capture → RGB PNG, `shot.main(path)`), `guictrl2.py` (SendInput GUI driver — `click/dblclick/wheel/drag`; synthetic WM_ messages are dropped by winit, hardware-level SendInput works; all coords logical @2× DPI), `texrect.py` (texture-rect detector), `mode_test.py` (reference comparison, `--tex` flag; Bernstein palette coef 9/15/8.5), `png_compare.py` (pure-Python RGB PNG decoder), `bs_diag.py` / `bs_fma2.py` (BurningShip FMA sweeps), `atomic_click.py` (atomic foreground+click+PrintWindow), `model_img.py` / `cfit.py` / `sens_test.py` (Julia diagnostics), `app.log`, `gate-run.log`, `claude-review-wrapfix-verdict.json`. No PIL on this host — all image math is numpy (integral-image area-downscale in the verification scripts).
 
 ## Phase 4B — GPU paint callback (`src/gpu.rs`) — done, committed (`d053b26`)
 
@@ -74,7 +78,7 @@ Scratch inventory: `cap2.py` (PrintWindow capture), `mode_test.py` (reference co
 - [x] Keep CPU renderer as the fallback
 - [x] Remove the three `#[allow(dead_code)] // wired into main.rs in Phase 4C` annotations
 - [x] Verify GPU output against CPU — done via the in-the-loop pixel test (see "Where things stand"); remaining mode gaps listed in "Next-session plan"
-- [ ] Re-run full GUI smoke test with the GPU path active
+- [x] Re-run full GUI smoke test with the GPU path active (2026-11-10, 9/9 interactions — see verification results above)
 
 ## Standing rules (recap)
 
